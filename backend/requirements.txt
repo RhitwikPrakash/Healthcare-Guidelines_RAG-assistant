@@ -1,0 +1,17 @@
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
+pydantic-settings>=2.7,<3
+python-multipart>=0.0.20,<1
+pymupdf>=1.25,<2
+chromadb>=1.0,<2
+sentence-transformers>=4.0,<6
+rank-bm25>=0.2.2,<1
+langchain-text-splitters>=0.3,<2
+requests>=2.32,<3
+numpy>=1.26,<3
+orjson>=3.10,<4
+argon2-cffi>=23.1,<26
+PyJWT>=2.10,<3
+cryptography>=44,<47
+pytest>=8.3,<9
+httpx>=0.28,<1

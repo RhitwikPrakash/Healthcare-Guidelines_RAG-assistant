@@ -1,0 +1,73 @@
+{
+  "local_retrieval": {
+    "cases": [
+      {
+        "name": "who_hypertension.pdf",
+        "pages": 61,
+        "chunks": 199,
+        "question": "When should pharmacological treatment for hypertension be initiated?",
+        "retrieval_query": "hypertension pharmacological treatment initiation threshold systolic diastolic blood pressure",
+        "keyword_hits": [
+          "140",
+          "90",
+          "hypertension",
+          "pharmacological"
+        ],
+        "passed": true,
+        "top_pages": [
+          19,
+          9,
+          56,
+          9,
+          5
+        ],
+        "top_preview": "who recommends initiation of pharmacological antihypertensive treatment of individuals with a confirmed diagnosis of hypertension and systolic blood pressure of"
+      },
+      {
+        "name": "who_tb_preventive_treatment.pdf",
+        "pages": 268,
+        "chunks": 856,
+        "question": "Who should receive tuberculosis preventive treatment?",
+        "retrieval_query": "tuberculosis preventive treatment eligible populations HIV household contacts TB disease excluded",
+        "keyword_hits": [
+          "preventive treatment",
+          "hiv",
+          "household contacts",
+          "tb disease"
+        ],
+        "passed": true,
+        "top_pages": [
+          26,
+          68,
+          15,
+          125,
+          126
+        ],
+        "top_preview": "r people eligible for tpt (e.g. people receiving dialysis, prisoners) will also be hiv positive and would therefore require individual"
+      },
+      {
+        "name": "who_physical_activity.pdf",
+        "pages": 104,
+        "chunks": 429,
+        "question": "What physical activity is recommended for adults?",
+        "retrieval_query": "adults physical activity recommendation aerobic moderate vigorous minutes per week muscle strengthening",
+        "keyword_hits": [
+          "150",
+          "300",
+          "moderate-intensity",
+          "adults"
+        ],
+        "passed": true,
+        "top_pages": [
+          71,
+          12,
+          18,
+          42,
+          11
+        ],
+        "top_preview": "recommendation, moderate certainty evidence adults living with disability may increase moderate-intensity aerobic physical activity to more than 300 minutes; or"
+      }
+    ],
+    "passed": true
+  }
+}

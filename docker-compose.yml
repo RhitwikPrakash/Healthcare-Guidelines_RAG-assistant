@@ -1,0 +1,74 @@
+name: healthcare-rag
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: healthcare-rag-ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  backend:
+    build:
+      context: ./backend
+    container_name: healthcare-rag-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      DATA_DIR: /app/data
+      HF_HOME: /models/huggingface
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - rag_data:/app/data
+      - model_cache:/models/huggingface
+    depends_on:
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 90s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: healthcare-rag-frontend
+    restart: unless-stopped
+    environment:
+      RAG_API_URL: http://backend:8000
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: healthcare-rag-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    profiles: ["public"]
+    depends_on:
+      frontend:
+        condition: service_started
+
+volumes:
+  ollama_data:
+  rag_data:
+  model_cache:

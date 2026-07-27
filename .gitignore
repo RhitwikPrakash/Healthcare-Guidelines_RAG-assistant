@@ -1,0 +1,74 @@
+# Environment and secrets
+.env
+.env.local
+.env.production
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test and analysis caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local download and package caches
+.cache/
+pip-cache/
+
+# IDE files
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Archives
+*.zip
+
+# Temporary backup files
+*.backup
+*.bak
+_upgrade_backups/
+
+# Downloaded Hugging Face models
+models/
+
+# Uploaded medical documents
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Chroma vector database
+data/chroma/*
+!data/chroma/.gitkeep
+
+# Session and document indexes
+data/sessions/*
+!data/sessions/.gitkeep
+
+# Public PDF test downloads
+data/public_test_pdfs/*
+!data/public_test_pdfs/.gitkeep
+
+# Authenticated chat-history database
+data/chat_history.db
+data/chat_history.db-shm
+data/chat_history.db-wal
+data/chat_history.db-journal
+
+# Automatically generated authentication secrets
+data/.jwt_secret
+data/.history_key
