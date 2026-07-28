@@ -72,3 +72,4 @@ data/chat_history.db-journal
 # Automatically generated authentication secrets
 data/.jwt_secret
 data/.history_key
+cloud_lite/.streamlit/secrets.toml
