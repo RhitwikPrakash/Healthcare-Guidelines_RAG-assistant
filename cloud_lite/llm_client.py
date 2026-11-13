@@ -6,216 +6,205 @@ from typing import Optional, Tuple
 import requests
 
 
-RATE_LIMIT_MESSAGE = "Please wait about 40–60 seconds and try again."
+RATE_LIMIT_MESSAGE = (
+    "The AI providers are rate-limited or their API credit/quota is exhausted. "
+    "Please check your provider usage limits and retry shortly."
+)
 
 
 class ProviderRateLimitError(RuntimeError):
-    """Raised when the available provider has temporarily exhausted its free quota."""
+    """Raised when provider rate limits or quota prevent answering."""
 
 
 class ProviderUnavailableError(RuntimeError):
-    """Raised when neither configured provider can complete the request."""
-
-
-class ProviderIncompleteError(ProviderUnavailableError):
-    """Raised when a provider stops before producing a complete answer."""
+    """Raised when the configured providers cannot complete the answer."""
 
 
 def get_secret(name: str) -> Optional[str]:
+    """Read secrets from environment variables or Streamlit Secrets."""
     value = os.getenv(name)
-    if value:
-        return str(value).strip()
+    if value and value.strip():
+        return value.strip()
 
     try:
         import streamlit as st
 
-        if name in st.secrets:
-            value = st.secrets[name]
-            if value is not None:
-                return str(value).strip()
+        value = st.secrets.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
     except Exception:
         pass
 
     return None
 
 
+def get_openai_api_key() -> Optional[str]:
+    return get_secret("OPENAI_API_KEY")
+
+
 def get_gemini_api_key() -> Optional[str]:
-    """Accept either Gemini key name used by the project."""
-    return get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
+    # Both spellings are supported for existing Streamlit deployments.
+    return get_secret("GOOGLE_API_KEY") or get_secret("GEMINI_API_KEY")
 
 
-def _looks_complete(text: str) -> bool:
-    clean = (text or "").strip()
-    if len(clean) < 40:
-        return False
+def _parse_openai_text(data: dict) -> str:
+    """Extract visible text from the OpenAI Responses API result."""
+    pieces = []
+    for item in data.get("output", []):
+        if item.get("type") != "message":
+            continue
+        for part in item.get("content", []):
+            if part.get("type") == "output_text" and part.get("text"):
+                pieces.append(part["text"])
 
-    bad_endings = (
-        "including",
-        "such as",
-        "for example",
-        "and",
-        "or",
-        "with",
-        "because",
-        "therefore",
-        "including:",
-        "such as:",
-    )
-    return clean[-1] in ".!?)]}" and not clean.casefold().endswith(bad_endings)
+    # The official Python SDK synthesizes output_text; REST may include it too.
+    return "\n".join(pieces).strip() or str(data.get("output_text") or "").strip()
 
 
-def call_gemini(prompt: str, max_tokens: int = 1800) -> Tuple[str, str]:
-    api_key = get_gemini_api_key()
-    if not api_key:
-        raise ProviderUnavailableError("Gemini API key is missing.")
+def call_openai(prompt: str, max_tokens: int = 1600) -> Tuple[str, str]:
+    """Primary answer provider: OpenAI Responses API (no server-side storage)."""
+    key = get_openai_api_key()
+    if not key:
+        raise ProviderUnavailableError("OpenAI API key is missing.")
+
+    model = get_secret("OPENAI_MODEL") or "gpt-5.4-mini"
+    payload = {
+        "model": model,
+        "instructions": (
+            "You are a careful healthcare-guideline RAG assistant. Answer the "
+            "current question using ONLY the supplied document evidence. "
+            "Distinguish disease stage, patient group and treatment context; do not "
+            "combine recommendations from unrelated sections. If evidence is "
+            "insufficient, say so. Do not invent citations or add inline source labels. "
+            "This is educational information, not medical advice."
+        ),
+        "input": prompt,
+        "max_output_tokens": max_tokens,
+        # Avoid retaining response objects in the provider's Responses store.
+        "store": False,
+    }
+    # GPT-5.4 mini supports disabling reasoning for direct grounded answers.
+    if model.startswith("gpt-5.4"):
+        payload["reasoning"] = {"effort": "none"}
+
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/responses",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=(10, 110),
+        )
+    except requests.RequestException as error:
+        raise ProviderUnavailableError("OpenAI request failed due to a connection error.") from error
+
+    if response.status_code in (402, 429):
+        raise ProviderRateLimitError(
+            "OpenAI API is rate-limited or has insufficient credit/quota."
+        )
+    if response.status_code >= 400:
+        raise ProviderUnavailableError(
+            f"OpenAI API request failed (HTTP {response.status_code})."
+        )
+
+    try:
+        data = response.json()
+        answer = _parse_openai_text(data)
+        status = data.get("status")
+    except (ValueError, AttributeError, TypeError) as error:
+        raise ProviderUnavailableError("OpenAI returned an invalid response.") from error
+
+    if status == "incomplete":
+        raise ProviderUnavailableError("OpenAI returned an incomplete answer.")
+    if not answer:
+        raise ProviderUnavailableError("OpenAI returned an empty answer.")
+
+    return answer, model
+
+
+def call_gemini(prompt: str, max_tokens: int = 1600) -> Tuple[str, str]:
+    """Fallback answer provider: Google Gemini."""
+    key = get_gemini_api_key()
+    if not key:
+        raise ProviderUnavailableError("Gemini fallback API key is missing.")
 
     model = get_secret("GEMINI_MODEL") or "gemini-2.5-flash"
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
-    )
     payload = {
         "contents": [
-            {
-                "role": "user",
-                "parts": [{"text": prompt}],
-            }
+            {"role": "user", "parts": [{"text": prompt}]}
         ],
         "generationConfig": {
             "temperature": 0.15,
             "topP": 0.9,
             "maxOutputTokens": max_tokens,
-            # RAG answers need concise synthesis, not a large hidden thinking budget.
-            "thinkingConfig": {
-                "thinkingBudget": 0,
-            },
         },
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=90)
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+            json=payload,
+            timeout=(10, 110),
+        )
     except requests.RequestException as error:
-        raise ProviderUnavailableError("Gemini is temporarily unavailable.") from error
+        raise ProviderUnavailableError("Gemini fallback is temporarily unavailable.") from error
 
     if response.status_code == 429:
-        raise ProviderRateLimitError(RATE_LIMIT_MESSAGE)
+        raise ProviderRateLimitError("Gemini fallback is rate-limited.")
     if response.status_code >= 400:
         raise ProviderUnavailableError(
-            f"Gemini request failed with status {response.status_code}."
+            f"Gemini fallback request failed (HTTP {response.status_code})."
         )
 
     try:
         data = response.json()
         candidates = data.get("candidates", [])
         if not candidates:
-            raise ProviderUnavailableError("Gemini returned no answer candidate.")
-
+            raise ValueError("No candidates")
         candidate = candidates[0]
-        finish_reason = str(candidate.get("finishReason") or "").upper()
-        parts = candidate.get("content", {}).get("parts", [])
-        text = "\n".join(part.get("text", "") for part in parts).strip()
-    except ProviderUnavailableError:
-        raise
-    except (ValueError, KeyError, IndexError, TypeError) as error:
-        raise ProviderUnavailableError("Gemini returned an invalid response.") from error
+        text = "\n".join(
+            p["text"] for p in candidate.get("content", {}).get("parts", [])
+            if isinstance(p, dict) and p.get("text")
+        ).strip()
+        finish = candidate.get("finishReason")
+    except (ValueError, AttributeError, KeyError, TypeError) as error:
+        raise ProviderUnavailableError("Gemini fallback returned an invalid response.") from error
 
-    if finish_reason == "MAX_TOKENS":
-        raise ProviderIncompleteError("Gemini stopped at its output-token limit.")
-    if finish_reason and finish_reason != "STOP":
-        raise ProviderUnavailableError(
-            f"Gemini stopped before completion ({finish_reason})."
-        )
+    if finish == "MAX_TOKENS":
+        raise ProviderUnavailableError("Gemini fallback reached its output limit.")
     if not text:
-        raise ProviderUnavailableError("Gemini returned an empty response.")
-    if not _looks_complete(text):
-        raise ProviderIncompleteError("Gemini returned an incomplete answer.")
-
+        raise ProviderUnavailableError("Gemini fallback returned an empty answer.")
     return text, model
 
 
-def call_groq(prompt: str, max_tokens: int = 900) -> Tuple[str, str]:
-    api_key = get_secret("GROQ_API_KEY")
-    if not api_key:
-        raise ProviderUnavailableError("Groq API key is missing.")
-
-    model = get_secret("GROQ_MODEL") or "llama-3.1-8b-instant"
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a careful healthcare-document RAG assistant. "
-                    "Use only the supplied evidence, answer concisely, finish every "
-                    "sentence, and do not add inline citation labels."
-                ),
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-        "temperature": 0.15,
-        "max_tokens": max_tokens,
-    }
+def generate_answer(prompt: str, max_tokens: int = 1600) -> Tuple[str, str, str]:
+    """Return (answer, provider label, model); OpenAI first, Gemini on failure."""
+    primary_error: Optional[Exception] = None
+    try:
+        text, model = call_openai(prompt, max_tokens=max_tokens)
+        return text, "OpenAI", model
+    except (ProviderUnavailableError, ProviderRateLimitError) as error:
+        primary_error = error
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=90)
-    except requests.RequestException as error:
-        raise ProviderUnavailableError("Groq is temporarily unavailable.") from error
-
-    if response.status_code == 429:
-        raise ProviderRateLimitError(RATE_LIMIT_MESSAGE)
-    if response.status_code >= 400:
+        text, model = call_gemini(prompt, max_tokens=max_tokens)
+        return text, "Gemini fallback", model
+    except ProviderRateLimitError as fallback_error:
+        if isinstance(primary_error, ProviderRateLimitError):
+            raise ProviderRateLimitError(RATE_LIMIT_MESSAGE) from fallback_error
         raise ProviderUnavailableError(
-            f"Groq request failed with status {response.status_code}."
-        )
-
-    try:
-        data = response.json()
-        choice = data["choices"][0]
-        text = choice["message"]["content"].strip()
-        finish_reason = str(choice.get("finish_reason") or "").lower()
-    except (ValueError, KeyError, IndexError, TypeError) as error:
-        raise ProviderUnavailableError("Groq returned an invalid response.") from error
-
-    if finish_reason == "length":
-        raise ProviderIncompleteError("Groq stopped at its output-token limit.")
-    if finish_reason and finish_reason != "stop":
+            "OpenAI failed and Gemini fallback is rate-limited. "
+            "Check the API key, credits and provider usage quotas."
+        ) from fallback_error
+    except ProviderUnavailableError as fallback_error:
+        if isinstance(primary_error, ProviderRateLimitError):
+            raise ProviderRateLimitError(
+                "OpenAI is rate-limited/out of credit, and Gemini fallback "
+                f"also failed: {fallback_error}"
+            ) from fallback_error
         raise ProviderUnavailableError(
-            f"Groq stopped before completion ({finish_reason})."
-        )
-    if not text:
-        raise ProviderUnavailableError("Groq returned an empty response.")
-    if not _looks_complete(text):
-        raise ProviderIncompleteError("Groq returned an incomplete answer.")
-
-    return text, model
-
-
-def generate_answer(prompt: str) -> Tuple[str, str, str]:
-    """Use Gemini first, then Groq; never return a visibly truncated answer."""
-    gemini_error: Optional[Exception] = None
-
-    try:
-        text, model = call_gemini(prompt, max_tokens=1800)
-        return text, "Gemini", model
-    except Exception as error:  # fallback is intentional
-        gemini_error = error
-
-    try:
-        text, model = call_groq(prompt, max_tokens=900)
-        return text, "Groq fallback", model
-    except ProviderRateLimitError:
-        raise
-    except Exception as groq_error:
-        if isinstance(gemini_error, ProviderRateLimitError):
-            raise ProviderRateLimitError(RATE_LIMIT_MESSAGE) from groq_error
-        raise ProviderUnavailableError(
-            "The AI providers could not complete the answer. Please try again shortly."
-        ) from groq_error
+            f"Both providers failed. OpenAI: {primary_error}; Gemini: {fallback_error}"
+        ) from fallback_error
