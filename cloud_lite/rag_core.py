@@ -399,6 +399,8 @@ Grounding rules:
 - Keep medical wording educational; do not diagnose or prescribe.
 - Do not include citation numbers, bracketed labels, source names, page numbers, a References section, or an Evidence section inside the answer.
 - The application will append references and evidence separately after the answer.
+- The ONLY exception to the no-label instruction is the final machine-readable
+  [[SUPPORTING_EVIDENCE: ...]] line specified below, which the app removes.
 - Finish every sentence and do not end mid-thought.
 
 Completeness rules for multi-part questions:
@@ -421,7 +423,15 @@ Question:
 Evidence:
 {evidence_text}
 
-Write only the answer body, without citations or references.
+Write only the answer body, without citations or references, followed by ONE final
+machine-readable line of this exact form:
+[[SUPPORTING_EVIDENCE: 2, 4]]
+Use only the numbered Evidence item IDs actually supplied above that DIRECTLY support
+claims in your answer. Do not select all evidence by default. If none directly
+supports the answer or you used the insufficient-evidence response, write:
+[[SUPPORTING_EVIDENCE: NONE]]
+Do NOT invent item IDs or source page numbers. The application maps these IDs to
+actual PDF source pages and removes this metadata before displaying your answer.
 """.strip()
 
 
@@ -474,6 +484,36 @@ def strip_inline_citations(answer: str) -> str:
     clean = re.sub(r"[ \t]+\n", "\n", clean)
     clean = re.sub(r"\n{3,}", "\n\n", clean)
     return clean.strip()
+
+
+def parse_answer_evidence(raw_answer: str, evidence_cards: List[Dict]):
+    """Return (clean answer, selected real PDF cards).
+
+    Model output provides evidence *item IDs*, never user-facing page numbers.
+    Only IDs mapping to supplied retrieved chunks can become a citation.
+    Missing metadata means no citations rather than assuming every retrieved
+    chunk supports the answer. This is source mapping, not proof of medical accuracy.
+    """
+    match = re.search(
+        r"\[\[\s*SUPPORTING_EVIDENCE\s*:\s*([^\]]+)\]\]\s*$",
+        raw_answer,
+        flags=re.IGNORECASE,
+    )
+    body = raw_answer[:match.start()].rstrip() if match else raw_answer.strip()
+    body = strip_inline_citations(body)
+    insufficient = "the uploaded document does not provide enough evidence to answer this" in body.casefold()
+    if insufficient:
+        return body, []
+    if not match:
+        return body, []
+
+    labels = [int(item) for item in re.findall(r"\d+", match.group(1))]
+    by_label = {int(card["label"]): card for card in evidence_cards}
+    selected, seen = [], set()
+    for label in labels:
+        if label in by_label and label not in seen:
+            selected.append(by_label[label]); seen.add(label)
+    return body, selected
 
 
 def format_evidence_cards(chunks: List[Chunk]) -> List[Dict]:
