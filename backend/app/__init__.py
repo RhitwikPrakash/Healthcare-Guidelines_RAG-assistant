@@ -1,1 +1,0 @@
-"""Healthcare Guidelines RAG backend."""

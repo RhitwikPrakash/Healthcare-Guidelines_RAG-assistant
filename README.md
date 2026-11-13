@@ -1,103 +1,110 @@
-# Healthcare Guidelines RAG Assistant — Super Local Edition
+# Healthcare Guidelines RAG Assistant
 
-A local-first, Dockerised medical-document RAG assistant that researches one or many healthcare PDFs and produces evidence-grounded answers with page-level citations.
+A Streamlit-based Retrieval-Augmented Generation (RAG) assistant that answers questions from uploaded healthcare guideline PDFs using retrieved evidence and page-level references.
 
-## Selected medical stack
+## Features
 
-- UI: Streamlit
-- API and job orchestration: FastAPI
-- Local inference: Ollama
-- Primary medical model: MedGemma 1.5 4B
-- Reasoning fallback: Qwen 3.5 4B
-- Biomedical embeddings: PubMedBERT (`NeuML/pubmedbert-base-embeddings`)
-- Sparse retrieval: BM25
-- Dense vector store: ChromaDB
-- Biomedical reranking: NCBI MedCPT cross-encoder
-- Automatic reranker fallback: MiniLM cross-encoder
+- Upload and process multiple medical PDFs
+- Extract text using PyMuPDF
+- Build a TF-IDF retrieval index with scikit-learn
+- Retrieve relevant evidence using cosine similarity
+- Generate document-grounded answers with Google Gemini
+- Use Groq as a fallback LLM provider
+- Fast, Smart Auto, and Deep Research answer modes
+- Display references at the end of answers
+- Inspect retrieved evidence and source pages
+- Login authentication using configured credentials
+- Session-based chat history, switching and renaming
+- Export conversations as Markdown
+- API request pacing and rate-limit handling
+
+## Technology Stack
+
+- Frontend and application: Python, Streamlit
 - PDF extraction: PyMuPDF
-- Chunking: section-aware LangChain text splitting
-- Deployment: Docker Compose and optional Cloudflare Tunnel
+- Retrieval: TF-IDF, cosine similarity, scikit-learn
+- Numerical operations: NumPy
+- Primary LLM: Google Gemini
+- Fallback LLM: Groq
+- API communication: Requests
+- Authentication: Streamlit Secrets and session state
+- Deployment: Streamlit Community Cloud
 
-## What makes this version stronger
+## RAG Architecture
 
-- No Gemini or Groq quota dependency during normal use.
-- Biomedical embeddings instead of local feature hashing.
-- Dense + BM25 hybrid retrieval with reciprocal-rank fusion.
-- Cross-encoder reranking and neighbouring-evidence expansion.
-- Adaptive focused, multi-hop and document-wide research strategies.
-- Atomic versioned indexes: failed reprocessing does not erase the last working knowledge base.
-- Live processing stages in the sidebar and answer area.
-- Citation validation, evidence cards and grounding confidence.
-- Primary and fallback local LLMs.
-- Persistent Ollama, Hugging Face and RAG data volumes.
-- Public access through Cloudflare without exposing Ollama.
+PDF Upload
+    |
+PDF Text Extraction
+    |
+Text Chunking
+    |
+TF-IDF Indexing
+    |
+Question Processing
+    |
+Cosine Similarity Retrieval
+    |
+Evidence Selection
+    |
+Grounded Prompt Construction
+    |
+Gemini / Groq
+    |
+Answer + References + Evidence Cards
 
-## Windows quick start
+## Project Structure
 
-Requirements: Windows 11, Docker Desktop, at least 16 GB RAM recommended, and internet for the first model downloads.
+cloud_lite/
+    app.py
+    auth_utils.py
+    llm_client.py
+    pdf_utils.py
+    rag_core.py
+    request_gate.py
+    requirements.txt
+    .streamlit/
+        config.toml
+        secrets.toml.example
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\setup_windows.ps1
-```
+## Local Setup
 
-Open `http://localhost:8501`.
+1. Clone the repository.
+2. Open the cloud_lite directory.
+3. Install dependencies:
 
-## Manual Docker start
+   python -m pip install -r requirements.txt
 
-```powershell
-Copy-Item .env.example .env
-docker compose up -d --build
-docker compose exec -T ollama ollama pull medgemma1.5:4b
-docker compose exec -T ollama ollama pull qwen3.5:4b
-```
+4. Create a private .streamlit/secrets.toml file using
+   secrets.toml.example as a template.
+5. Configure authentication and LLM API credentials.
+6. Start the application:
 
-## Public URL with Cloudflare
+   python -m streamlit run app.py
 
-Add your token to `.env`:
+## Streamlit Cloud Deployment
 
-```env
-CLOUDFLARE_TUNNEL_TOKEN=your_token_here
-```
+Main application file:
 
-Then run:
+cloud_lite/app.py
 
-```powershell
-.\scripts\start_cloudflare.ps1
-```
+Install dependencies from:
 
-The host machine must remain powered on, awake, connected to the internet and running Docker Desktop.
+cloud_lite/requirements.txt
 
-## Project layout
+Configure AUTH_USERNAME, AUTH_EMAIL, AUTH_PASSWORD,
+GOOGLE_API_KEY and GROQ_API_KEY in Streamlit Cloud Secrets.
 
-```text
-backend/        FastAPI, ingestion, retrieval, generation, validation and tests
-frontend/       Streamlit interface and live pipeline display
-scripts/        setup, verification, Cloudflare and public-PDF tests
-docs/           architecture, deployment, profiles, commands and troubleshooting
-cloudflare/     optional locally managed tunnel config example
-docker-compose.yml
-```
+Never commit actual passwords or API keys.
 
-## Main flow
+## Limitations
 
-```text
-Question -> adaptive query planning -> whole-PDF / multi-query research -> PubMedBERT + BM25 retrieval -> fusion -> MedCPT biomedical reranking -> evidence expansion -> MedGemma/Qwen answer -> citation and safety validation
-```
+- Chat history is retained only during the current session.
+- Retrieval is primarily lexical and may miss semantic matches.
+- Answers depend on the uploaded evidence and LLM output.
+- This application is not a medical diagnostic or prescribing tool.
+- Confidential medical data should not be uploaded without
+  appropriate authorization and provider privacy review.
 
-## Documentation
+## License
 
-- `docs/ARCHITECTURE.md`
-- `docs/DEPLOYMENT.md`
-- `docs/MODEL_PROFILES.md`
-- `docs/TERMINAL_COMMANDS.md`
-- `docs/TESTING.md`
-- `docs/TROUBLESHOOTING.md`
-
-## Safety
-
-This is an educational document assistant, not a diagnostic or prescribing system. It answers only from the uploaded evidence and should explicitly report insufficient or conflicting evidence. Always verify consequential decisions in the original guideline and with qualified clinical professionals.
-
-## Model terms
-
-The application code is licensed separately from downloaded models. Review the licence and acceptable-use terms shown by each model publisher before deployment, especially for MedGemma and other healthcare models.
+MIT License.
